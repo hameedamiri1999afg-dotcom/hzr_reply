@@ -41,7 +41,6 @@ app.post("/api/whatsapp/webhook", async (req, res) => {
 
         let messages = req.body?.data?.messages;
 
-        // messages.upsert returns an array
         if (!Array.isArray(messages)) {
             messages = messages ? [messages] : [];
         }
@@ -51,7 +50,6 @@ app.post("/api/whatsapp/webhook", async (req, res) => {
 
             const key = message.key || {};
 
-            // Don't reply to our own messages
             if (key.fromMe === true) {
                 continue;
             }
