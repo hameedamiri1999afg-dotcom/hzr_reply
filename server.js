@@ -6,7 +6,6 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 const WASENDER_API_KEY = process.env.WASENDER_API_KEY;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 app.get("/", (req, res) => {
     res.send("HZR Reply is running.");
