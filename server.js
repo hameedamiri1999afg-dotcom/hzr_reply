@@ -14,89 +14,87 @@ app.get("/", (req, res) => {
 
 app.post("/api/whatsapp/webhook", async (req, res) => {
     try {
-        // بررسی Webhook Secret
+        console.log("========== WEBHOOK RECEIVED ==========");
+        console.log("Event:", req.body?.event);
+        console.log("Body:", JSON.stringify(req.body));
+
         const signature = req.headers["x-webhook-signature"];
 
         if (WEBHOOK_SECRET && signature !== WEBHOOK_SECRET) {
+            console.log("Invalid webhook signature.");
             return res.status(401).json({
                 success: false,
                 error: "Invalid webhook signature"
             });
         }
 
-        const payload = req.body;
+        const event = req.body?.event;
 
-        console.log("Event:", payload.event);
-
-        // فقط پیام‌های دریافتی
         if (
-            payload.event !== "messages.received" &&
-            payload.event !== "messages-personal.received"
+            event !== "messages.upsert" &&
+            event !== "messages.received" &&
+            event !== "messages-personal.received"
         ) {
-            return res.status(200).json({
-                received: true,
-                ignored: true
-            });
+            console.log("Ignored event:", event);
+            return res.status(200).json({ received: true });
         }
 
-        const message = payload.data?.messages;
+        let messages = req.body?.data?.messages;
 
-        if (!message) {
-            return res.status(200).json({
-                received: true
-            });
+        // messages.upsert returns an array
+        if (!Array.isArray(messages)) {
+            messages = messages ? [messages] : [];
         }
 
-        // پیام‌هایی که خودمان فرستاده‌ایم را نادیده بگیر
-        if (message.key?.fromMe === true) {
-            return res.status(200).json({
-                received: true,
-                ignored: true
-            });
-        }
+        for (const message of messages) {
+            if (!message) continue;
 
-        const text = (message.messageBody || "").trim();
-        const sender = message.key?.remoteJid;
+            const key = message.key || {};
 
-        console.log("From:", sender);
-        console.log("Message:", text);
-
-        if (!sender || !text) {
-            return res.status(200).json({
-                received: true
-            });
-        }
-
-        // اگر کسی گفت سلام
-        if (text.includes("سلام")) {
-
-            if (!WASENDER_API_KEY) {
-                console.error("WASENDER_API_KEY is missing.");
-
-                return res.status(500).json({
-                    success: false,
-                    error: "API key is not configured"
-                });
+            // Don't reply to our own messages
+            if (key.fromMe === true) {
+                continue;
             }
 
-            const response = await fetch(
-                "https://www.wasenderapi.com/api/send-message",
-                {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${WASENDER_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        to: sender,
-                        text: "ع سلام"
-                    })
+            const text = String(message.messageBody || "").trim();
+
+            const sender =
+                key.remoteJid ||
+                key.senderPn ||
+                key.cleanedSenderPn;
+
+            console.log("Sender:", sender);
+            console.log("Message:", text);
+
+            if (!sender || !text) {
+                continue;
+            }
+
+            if (text.includes("سلام")) {
+                if (!WASENDER_API_KEY) {
+                    console.error("WASENDER_API_KEY is missing.");
+                    continue;
                 }
-            );
 
-            const result = await response.json();
+                const response = await fetch(
+                    "https://www.wasenderapi.com/api/send-message",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${WASENDER_API_KEY}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            to: sender,
+                            text: "ع سلام"
+                        })
+                    }
+                );
 
-            console.log("Wasender response:", result);
+                const result = await response.json();
+
+                console.log("Send response:", JSON.stringify(result));
+            }
         }
 
         return res.status(200).json({
@@ -104,7 +102,7 @@ app.post("/api/whatsapp/webhook", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Webhook error:", error);
+        console.error("WEBHOOK ERROR:", error);
 
         return res.status(500).json({
             success: false,
