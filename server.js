@@ -1,76 +1,118 @@
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    DisconnectReason
-} = require("@whiskeysockets/baileys");
+const express = require("express");
 
-const P = require("pino");
-const qrcode = require("qrcode-terminal");
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState("./auth");
+app.use(express.json());
 
-    const sock = makeWASocket({
-        auth: state,
-        logger: P({ level: "silent" }),
-        printQRInTerminal: false
-    });
+const WASENDER_API_KEY = process.env.WASENDER_API_KEY;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-    sock.ev.on("creds.update", saveCreds);
+app.get("/", (req, res) => {
+    res.send("HZR Reply is running.");
+});
 
-    sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect, qr } = update;
+app.post("/api/whatsapp/webhook", async (req, res) => {
+    try {
+        // بررسی Webhook Secret
+        const signature = req.headers["x-webhook-signature"];
 
-        if (qr) {
-            console.log("\nScan this QR code with WhatsApp:\n");
-            qrcode.generate(qr, { small: true });
-        }
-
-        if (connection === "open") {
-            console.log("HZR Reply connected successfully.");
-        }
-
-        if (connection === "close") {
-            const shouldReconnect =
-                lastDisconnect?.error?.output?.statusCode !==
-                DisconnectReason.loggedOut;
-
-            if (shouldReconnect) {
-                console.log("Connection closed. Reconnecting...");
-                startBot();
-            } else {
-                console.log("WhatsApp session logged out.");
-            }
-        }
-    });
-
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-        const message = messages[0];
-
-        if (!message.message) return;
-        if (message.key.fromMe) return;
-
-        const jid = message.key.remoteJid;
-
-        if (!jid || jid === "status@broadcast") return;
-
-        const text =
-            message.message.conversation ||
-            message.message.extendedTextMessage?.text ||
-            "";
-
-        console.log(`Message from ${jid}: ${text}`);
-
-        if (text.trim().includes("سلام")) {
-            await sock.sendMessage(jid, {
-                text: "ع سلام"
+        if (WEBHOOK_SECRET && signature !== WEBHOOK_SECRET) {
+            return res.status(401).json({
+                success: false,
+                error: "Invalid webhook signature"
             });
-
-            console.log(`Reply sent to ${jid}`);
         }
-    });
-}
 
-startBot().catch((error) => {
-    console.error("Fatal error:", error);
+        const payload = req.body;
+
+        console.log("Event:", payload.event);
+
+        // فقط پیام‌های دریافتی
+        if (
+            payload.event !== "messages.received" &&
+            payload.event !== "messages-personal.received"
+        ) {
+            return res.status(200).json({
+                received: true,
+                ignored: true
+            });
+        }
+
+        const message = payload.data?.messages;
+
+        if (!message) {
+            return res.status(200).json({
+                received: true
+            });
+        }
+
+        // پیام‌هایی که خودمان فرستاده‌ایم را نادیده بگیر
+        if (message.key?.fromMe === true) {
+            return res.status(200).json({
+                received: true,
+                ignored: true
+            });
+        }
+
+        const text = (message.messageBody || "").trim();
+        const sender = message.key?.remoteJid;
+
+        console.log("From:", sender);
+        console.log("Message:", text);
+
+        if (!sender || !text) {
+            return res.status(200).json({
+                received: true
+            });
+        }
+
+        // اگر کسی گفت سلام
+        if (text.includes("سلام")) {
+
+            if (!WASENDER_API_KEY) {
+                console.error("WASENDER_API_KEY is missing.");
+
+                return res.status(500).json({
+                    success: false,
+                    error: "API key is not configured"
+                });
+            }
+
+            const response = await fetch(
+                "https://www.wasenderapi.com/api/send-message",
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${WASENDER_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        to: sender,
+                        text: "ع سلام"
+                    })
+                }
+            );
+
+            const result = await response.json();
+
+            console.log("Wasender response:", result);
+        }
+
+        return res.status(200).json({
+            received: true
+        });
+
+    } catch (error) {
+        console.error("Webhook error:", error);
+
+        return res.status(500).json({
+            success: false,
+            error: "Internal server error"
+        });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`HZR Reply running on port ${PORT}`);
 });
