@@ -15,7 +15,7 @@ app.get("/", (req, res) => {
 app.post("/api/whatsapp/webhook", async (req, res) => {
     try {
         console.log("========== WEBHOOK RECEIVED ==========");
-        console.log("Event:", req.body?.event);
+        console.log("Event:", JSON.stringify(req.body?.event));
         console.log("Body:", JSON.stringify(req.body));
 
         const signature = req.headers["x-webhook-signature"];
@@ -30,68 +30,64 @@ app.post("/api/whatsapp/webhook", async (req, res) => {
 
         const event = req.body?.event;
 
+        // Current WasenderAPI payload
         if (
-            event !== "messages.upsert" &&
-            event !== "messages.received" &&
-            event !== "messages-personal.received"
+            event?.type === "messages" &&
+            event?.event === "post"
         ) {
-            console.log("Ignored event:", event);
-            return res.status(200).json({ received: true });
-        }
+            const messages = Array.isArray(req.body?.messages)
+                ? req.body.messages
+                : [];
 
-        let messages = req.body?.data?.messages;
+            for (const message of messages) {
+                if (!message) continue;
 
-        if (!Array.isArray(messages)) {
-            messages = messages ? [messages] : [];
-        }
-
-        for (const message of messages) {
-            if (!message) continue;
-
-            const key = message.key || {};
-
-            if (key.fromMe === true) {
-                continue;
-            }
-
-            const text = String(message.messageBody || "").trim();
-
-            const sender =
-                key.remoteJid ||
-                key.senderPn ||
-                key.cleanedSenderPn;
-
-            console.log("Sender:", sender);
-            console.log("Message:", text);
-
-            if (!sender || !text) {
-                continue;
-            }
-
-            if (text.includes("سلام")) {
-                if (!WASENDER_API_KEY) {
-                    console.error("WASENDER_API_KEY is missing.");
+                if (message.from_me === true) {
                     continue;
                 }
 
-                const response = await fetch(
-                    "https://www.wasenderapi.com/api/send-message",
-                    {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${WASENDER_API_KEY}`,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            to: sender,
-                            text: "ع سلام"
-                        })
+                const text = String(
+                    message.text?.body || ""
+                ).trim();
+
+                const sender =
+                    message.from ||
+                    message.chat_id ||
+                    message.phone;
+
+                console.log("Sender:", sender);
+                console.log("Message:", text);
+
+                if (!sender || !text) {
+                    continue;
+                }
+
+                if (text.includes("سلام")) {
+                    if (!WASENDER_API_KEY) {
+                        console.error("WASENDER_API_KEY is missing.");
+                        continue;
                     }
-                );
 
-                const result = await response.json();
+                    const response = await fetch(
+                        "https://www.wasenderapi.com/api/send-message",
+                        {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${WASENDER_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                to: sender,
+                                text: "ع سلام"
+                            })
+                        }
+                    );
 
-                console.log("Send response:", JSON.stringify(result));
+                    const result = await response.text();
+
+                    console.log("Send status:", response.status);
+                    console.log("Send response:", result);
+                }
             }
         }
 
